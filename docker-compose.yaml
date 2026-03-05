@@ -8,41 +8,32 @@ services:
     container_name: postiz
     restart: always
     environment:
-      # === URLs — pointe vers ton domaine Dokploy
       MAIN_URL: 'https://nerva-postiz-4o18pi-48720f-51-83-45-107.traefik.me'
       FRONTEND_URL: 'https://nerva-postiz-4o18pi-48720f-51-83-45-107.traefik.me'
       NEXT_PUBLIC_BACKEND_URL: 'https://nerva-postiz-4o18pi-48720f-51-83-45-107.traefik.me/api'
       BACKEND_INTERNAL_URL: 'http://localhost:3000'
 
-      # === Auth
       JWT_SECRET: '07a021e33d2e2eaf462a4b3faa593897c6f8c7003b6c5b164ce005b8884e17ed'
 
-      # === Base de données & Redis
       DATABASE_URL: 'postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local'
       REDIS_URL: 'redis://postiz-redis:6379'
-
-      # === Temporal (stack interne)
       TEMPORAL_ADDRESS: 'temporal:7233'
 
-      # === Général
       IS_GENERAL: 'true'
       DISABLE_REGISTRATION: 'false'
       RUN_CRON: 'true'
       API_LIMIT: '30'
       NX_ADD_PLUGINS: 'false'
 
-      # === Storage local
       STORAGE_PROVIDER: 'local'
       UPLOAD_DIRECTORY: '/uploads'
       NEXT_PUBLIC_UPLOAD_DIRECTORY: '/uploads'
 
-      # === Chrome Extension (Skool, etc.)
       EXTENSION_ID: 'icpokdlcikdmemjkeoojhocmhmehpaia'
 
-      # === OpenAI — optionnel, laisser vide si non utilisé
       OPENAI_API_KEY: ''
 
-      # === Réseaux sociaux — remplir uniquement ceux utilisés
+      # Réseaux sociaux — remplir selon besoin
       X_API_KEY: ''
       X_API_SECRET: ''
       LINKEDIN_CLIENT_ID: ''
@@ -63,6 +54,149 @@ services:
       PINTEREST_CLIENT_SECRET: ''
       DISCORD_CLIENT_ID: ''
       DISCORD_CLIENT_SECRET: ''
+      DISCORD_BOT_TOKEN_ID: ''
+      SLACK_ID: ''
+      SLACK_SECRET: ''
+      SLACK_SIGNING_SECRET: ''
+      MASTODON_URL: 'https://mastodon.social'
+      MASTODON_CLIENT_ID: ''
+      MASTODON_CLIENT_SECRET: ''
+      BEEHIIVE_API_KEY: ''
+      BEEHIIVE_PUBLICATION_ID: ''
+      DRIBBBLE_CLIENT_ID: ''
+      DRIBBBLE_CLIENT_SECRET: ''
+
+      NEXT_PUBLIC_DISCORD_SUPPORT: ''
+      NEXT_PUBLIC_POLOTNO: ''
+
+    volumes:
+      - postiz-config:/config/
+      - postiz-uploads:/uploads/
+    networks:
+      - default          # réseau interne du compose (postgres, redis, temporal)
+      - dokploy-network  # réseau Traefik de Dokploy pour le routing HTTP
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.postiz.rule=Host(`nerva-postiz-4o18pi-48720f-51-83-45-107.traefik.me`)
+      - traefik.http.routers.postiz.entrypoints=websecure
+      - traefik.http.routers.postiz.tls.certresolver=letsencrypt
+      - traefik.http.services.postiz.loadbalancer.server.port=5000
+    depends_on:
+      postiz-postgres:
+        condition: service_healthy
+      postiz-redis:
+        condition: service_healthy
+
+  # ============================================================
+  # POSTGRES
+  # ============================================================
+  postiz-postgres:
+    image: postgres:17-alpine
+    container_name: postiz-postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: postiz-password
+      POSTGRES_USER: postiz-user
+      POSTGRES_DB: postiz-db-local
+    volumes:
+      - postgres-volume:/var/lib/postgresql/data
+    networks:
+      - default
+    healthcheck:
+      test: pg_isready -U postiz-user -d postiz-db-local
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================
+  # REDIS
+  # ============================================================
+  postiz-redis:
+    image: redis:7.2
+    container_name: postiz-redis
+    restart: always
+    healthcheck:
+      test: redis-cli ping
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - postiz-redis-data:/data
+    networks:
+      - default
+
+  # ============================================================
+  # TEMPORAL — Sans Elasticsearch (économise ~512MB RAM)
+  # ============================================================
+  temporal-postgresql:
+    container_name: temporal-postgresql
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_USER: temporal
+    networks:
+      - default
+    expose:
+      - 5432
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+
+  temporal:
+    container_name: temporal
+    image: temporalio/auto-setup:1.28.1
+    restart: always
+    depends_on:
+      - temporal-postgresql
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgresql
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - ENABLE_ES=false
+      - TEMPORAL_NAMESPACE=default
+    networks:
+      - default
+    expose:
+      - 7233
+    volumes:
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig
+
+  temporal-ui:
+    container_name: temporal-ui
+    image: temporalio/ui:2.34.0
+    restart: always
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://127.0.0.1:3000
+    networks:
+      - default
+    # Décommenter uniquement pour debug local :
+    # ports:
+    #   - '8080:8080'
+
+# ============================================================
+# VOLUMES
+# ============================================================
+volumes:
+  postgres-volume:
+  postiz-redis-data:
+  postiz-config:
+  postiz-uploads:
+  temporal-postgres-data:
+
+# ============================================================
+# NETWORKS
+# ============================================================
+networks:
+  default:
+    driver: bridge
+
+  dokploy-network:
+    external: true  # Géré par Dokploy, ne pas recréer      DISCORD_CLIENT_SECRET: ''
       DISCORD_BOT_TOKEN_ID: ''
       SLACK_ID: ''
       SLACK_SECRET: ''
